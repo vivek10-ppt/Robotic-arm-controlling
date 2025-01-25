@@ -7,16 +7,17 @@ import time
 from scipy.optimize import fsolve
 
 # Configure the serial port
-#serial_port = serial.Serial('COM3', 9600, timeout=1)  # Adjust COM port as per your setup
+serial_port = serial.Serial('COM6', 115200, timeout=1)  # Adjust COM port as per your setup
 time.sleep(2)  # Allow time for serial communication to establish
-# for senting data to arduino ,these angles values are used to rotate motors in arduino
+# for sending data to Arduino, these angle values are used to rotate motors in Arduino
 def move_motors(steps1, steps2, steps3):
     command = f"<{steps1},{steps2},{steps3}>\n"
-    serial_port.write(command.encode())
+    serial_port.write(command.encode()) 
     print(f"Sent command: {command.strip()}")
 
     response = serial_port.readline().decode().strip()
     print(f"Arduino response: {response}")
+
 # inverse kinematics equation
 def ik(x, y, z):
     # Define the equations based on the inverse kinematics equations
@@ -27,12 +28,12 @@ def ik(x, y, z):
         return [eq1, eq2]
 
     # Initialize the known values
-    P = 40  # length of arm
-    Q = 30  # length of arm2
+    P = 80  # length of arm
+    Q = 60  # length of arm2
     d = np.sqrt(x**2 + y**2)  # Replace with actual value
 
     # Initial guesses for A and B
-    initial_guesses = [0.1, 0.1]  # Non-zero initial guesses to avoid trivial solutions
+    initial_guesses = [1.0, 1.0]  # Non-zero initial guesses to avoid trivial solutions
 
     # Solve the equations
     solution = fsolve(equations, initial_guesses, args=(P, Q, d, z))
@@ -87,46 +88,8 @@ curve_points = []
 corner_points = []
 drawing_curve = False
 
-# Example lengths in millimeters
-lengths = [965, 715,945, 720]
-
-def pixel_to_real_world(corners, lengths):
-    def euclidean_distance(p1, p2):
-        return np.sqrt((p2[0] - p1[0]) ** 2 + (p2[1] - p1[1]) ** 2)
-    
-    # Calculate pixel distances for each side
-    D1_pixels = euclidean_distance(corners[0], corners[1])
-    D2_pixels = euclidean_distance(corners[1], corners[2])
-    D3_pixels = euclidean_distance(corners[2], corners[3])
-    D4_pixels = euclidean_distance(corners[3], corners[0])
-    
-    # Extract actual lengths from the input
-    L1, L2, L3, L4 = lengths
-    
-    # Calculate conversion factors
-    conv_factor1 = L1 / D1_pixels
-    conv_factor2 = L2 / D2_pixels
-    conv_factor3 = L3 / D3_pixels
-    conv_factor4 = L4 / D4_pixels
-    
-    return [conv_factor1, conv_factor2, conv_factor3, conv_factor4], corners[3]  # corners[3] is the bottom-left corner
-
-def convert_coordinates_to_real_world(pixel_point, origin, conversion_factors):
-    x_pixel, y_pixel = pixel_point
-    x0, y0 = origin
-    conv_factor1, conv_factor2, conv_factor3, conv_factor4 = conversion_factors
-    
-    # Calculate the pixel distance from the origin
-    dx_pixel = x_pixel - x0
-    #y_pixel = y_pixel
-    dy_pixel =  y0-y_pixel
-    
-    
-    # Convert pixel distances to real-world distances using the conversion factors
-    x_real = dx_pixel * conv_factor1
-    y_real = dy_pixel * conv_factor4  # y_real uses conv_factor4 for vertical scaling
-    
-    return float(x_real), float(y_real)
+# Coordinates to click for calibration (real-world coordinates)
+real_world_points = [(0,100), (60, 100), (60, 0), (0, 0)]  # Add Z-coordinates if known
 
 def show_distance(event, x, y, flags, param):
     global curve_points, corner_points, drawing_curve
@@ -143,7 +106,7 @@ def show_distance(event, x, y, flags, param):
             # Check if the point is inside the workbench
             if cv2.pointPolygonTest(np.array(corner_points), (x, y), False) >= 0:
                 curve_points.append((x, y))
-                
+
 def draw_curve(img, points):
     if len(points) < 2:
         return img, []
@@ -159,30 +122,47 @@ def draw_curve(img, points):
 
     detailed_curve_points = [(float(x), float(y)) for x, y in zip(x_new, y_new)]
     return img, detailed_curve_points
+
+
+def convert_coordinates_to_real_world(point, H):
+    # Convert the point to a homogeneous coordinate
+    homogeneous_point = np.array([point[0], point[1], 1.0], dtype=np.float32).reshape((3, 1))
+
+    # Apply the homography matrix
+    real_world_point = np.dot(H, homogeneous_point)
+
+    # Normalize to convert from homogeneous to 2D coordinates
+    real_world_point /= real_world_point[2]
+
+    return (real_world_point[0][0], real_world_point[1][0])
+def calculate_homography(corner_points, real_world_points):
+    # Convert lists to numpy arrays and ensure they're 2D arrays of shape (N, 2)
+    image_points = np.array(corner_points, dtype=np.float32).reshape(-1, 2)
+    world_points = np.array(real_world_points, dtype=np.float32).reshape(-1, 2)
+
+    # Check that you have at least 4 points
+    if len(image_points) < 4 or len(world_points) < 4:
+        raise ValueError("At least 4 points are required to calculate homography")
+
+    # Calculate the homography matrix
+    H, status = cv2.findHomography(image_points, world_points)
+
+    return H
+
+# Use this instead of calibrate_camera
+
 def sent_data(array):
-    prevsteps1,prevsteps2,prevsteps3=0,0,0
-    delay=3500
+    prevsteps1, prevsteps2, prevsteps3 = 0, 0, 0
+    delay = 3.5
     for i in array:
-        step1,step2,step3=ik(i[0],i[1],0)
-        input1=step1-prevsteps1
-        input2=step2-prevsteps2
-        input3=step3-prevsteps3
-        move_motors(input1,input2,input3)
+        step1, step2, step3 = ik(i[0], i[1], 0)
+        input1 = step1 - prevsteps1
+        input2 = step2 - prevsteps2
+        input3 = step3 - prevsteps3
+        move_motors(input1, input2, input3)
         time.sleep(delay)
-        delay=1000
-        prevsteps1,prevsteps2,prevsteps3=step1,step2,step3
-def print_data(array):
-    prevsteps1,prevsteps2,prevsteps3=0,0,0
-    delay=3.5
-    for i in array:
-        step1,step2,step3=ik(i[0],i[1],0)
-        input1=step1-prevsteps1
-        input2=step2-prevsteps2
-        input3=step3-prevsteps3
-        print(input1,input2,input3)
-        time.sleep(delay)
-        delay=1
-        prevsteps1,prevsteps2,prevsteps3=step1,step2,step3
+        delay = 1
+        prevsteps1, prevsteps2, prevsteps3 = step1, step2, step3
 
 dc = DepthCamera()
 cv2.namedWindow("frame")
@@ -209,8 +189,8 @@ while True:
         colour, detailed_curve_points = draw_curve(colour, curve_points)
 
     cv2.imshow("frame", colour)
-    #cv2.imshow("depth", depth_colormap)
-    
+    # cv2.imshow("depth", depth_colormap)
+
     key = cv2.waitKey(1)
     if key == 27:  # Exit on pressing 'Esc' key
         break
@@ -218,22 +198,21 @@ while True:
 dc.release()
 cv2.destroyAllWindows()
 
-# Calculate conversion factors after the corner points are selected
-#print(detailed_curve_points)
+# Calibration process using selected corner points and known world coordinates
 if len(corner_points) == 4:
-    conversion_factors, origin = pixel_to_real_world(corner_points, lengths)
-    #print("Conversion Factors:", conversion_factors)
-    print("Origin:", origin)
+    #camera_matrix, dist_coeffs, rvecs, tvecs = calibrate_camera(corner_points, real_world_points)
+    H = calculate_homography(corner_points, real_world_points)
+    # Convert detailed curve points to real-world coordinates using the camera calibration
+    real_world_coordinates = [convert_coordinates_to_real_world(point, H) for point in detailed_curve_points]
 
-    # Convert detailed curve points to real-world coordinates
-    real_world_coordinates = [convert_coordinates_to_real_world(point, origin, conversion_factors) for point in detailed_curve_points]
+    # Format the coordinates for easier manipulation and transfer to Arduino
+    formatted_coordinates = [(float(coord[0]), float(coord[1])) for coord in real_world_coordinates]
+
+    # Print the real-world coordinates in the desired format
+    print("Real-world Coordinates of Detailed Curve Points:")
+    print(formatted_coordinates)
     
+    sent_data(real_world_coordinates)
 
-    # Print the real-world coordinates
-   # print("Real-world Coordinates of Detailed Curve Points:")
-   # for coord in real_world_coordinates:
-       # print(coord)
-    #sent_data(real_world_coordinates) 
-    print_data(real_world_coordinates)
-
-serial_port.close()  # Close the serial port when done
+# Close the serial port when done
+serial_port.close()
