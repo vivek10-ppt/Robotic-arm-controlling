@@ -1,6 +1,8 @@
 import pyrealsense2 as rs
 import numpy as np
 import cv2
+from scipy.interpolate import splprep, splev
+
 
 class DepthCamera:
     def __init__(self):
@@ -31,30 +33,60 @@ class DepthCamera:
             return False, None, None
         return True, depth_image, color_image
 
-    def capture_still_photo(self, save_path):
-        # Get a frame
-        ret, depth, color = self.get_frame()
-        if not ret:
-            print("Failed to capture frame")
-            return
-        
-        # Convert BGR to RGB for OpenCV compatibility
-        color_rgb = cv2.cvtColor(color, cv2.COLOR_BGR2RGB)
-
-        # Save the image
-        cv2.imwrite(save_path, color_rgb)
-        print(f"Saved photo to {save_path}")
-
     def release(self):
         self.pipeline.stop()
 
 
-# Example usage:
-if __name__ == "__main__":
-    dc = DepthCamera()
+# List to store the points of the curved path
+curve_points = []
 
-    # Capture a still photo and save it
-    save_path = "captured_photo.jpg"
-    dc.capture_still_photo(save_path)
 
-    dc.release()
+def show_distance(event, x, y, flags, param):
+    global curve_points
+
+    if event == cv2.EVENT_LBUTTONDOWN:
+        # Add the point to the list
+        curve_points.append((x, y))
+
+
+def draw_curve(img, points):
+    if len(points) < 2:
+        return img, []
+
+    points = np.array(points)
+    k = min(3, len(points) - 1)  # Ensure degree of spline is less than number of points
+    tck, u = splprep([points[:, 0], points[:, 1]], s=0, k=k)
+    u_new = np.linspace(u.min(), u.max(), 1000)
+    x_new, y_new = splev(u_new, tck)
+
+    for i in range(len(x_new) - 1):
+        cv2.line(img, (int(x_new[i]), int(y_new[i])), (int(x_new[i + 1]), int(y_new[i + 1])), (0, 255, 0), 2)
+
+    detailed_curve_points = [(float(x), float(y)) for x, y in zip(x_new, y_new)]
+    return img, detailed_curve_points
+
+
+dc = DepthCamera()
+cv2.namedWindow("frame")
+cv2.setMouseCallback("frame", show_distance)
+
+while True:
+    ret, depth, colour = dc.get_frame()
+    if not ret:
+        continue
+
+    # Draw the curve on the image
+    colour, detailed_curve_points = draw_curve(colour, curve_points)
+
+    cv2.imshow("frame", colour)
+    cv2.imshow("depth", depth)
+    key = cv2.waitKey(1)
+    if key == 27:
+        break
+
+dc.release()
+cv2.destroyAllWindows()
+
+# Print the detailed curve points
+print("Detailed Curve Points:")
+print(detailed_curve_points)
