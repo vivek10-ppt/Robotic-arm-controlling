@@ -2,6 +2,45 @@ import pyrealsense2 as rs
 import numpy as np
 import cv2
 from scipy.interpolate import splprep, splev
+import serial
+import time
+from scipy.optimize import fsolve
+
+# Configure the serial port
+#serial_port = serial.Serial('COM3', 9600, timeout=1)  # Adjust COM port as per your setup
+time.sleep(2)  # Allow time for serial communication to establish
+# for senting data to arduino ,these angles values are used to rotate motors in arduino
+def move_motors(steps1, steps2, steps3):
+    command = f"<{steps1},{steps2},{steps3}>\n"
+    serial_port.write(command.encode())
+    print(f"Sent command: {command.strip()}")
+
+    response = serial_port.readline().decode().strip()
+    print(f"Arduino response: {response}")
+# inverse kinematics equation
+def ik(x, y, z):
+    # Define the equations based on the inverse kinematics equations
+    def equations(vars, P, Q, X, Z):
+        A, B = vars
+        eq1 = P * np.cos(A) + Q * np.sin(B) - X
+        eq2 = P * np.sin(A) - Q * np.cos(B) - Z
+        return [eq1, eq2]
+
+    # Initialize the known values
+    P = 40  # length of arm
+    Q = 30  # length of arm2
+    d = np.sqrt(x**2 + y**2)  # Replace with actual value
+
+    # Initial guesses for A and B
+    initial_guesses = [0.1, 0.1]  # Non-zero initial guesses to avoid trivial solutions
+
+    # Solve the equations
+    solution = fsolve(equations, initial_guesses, args=(P, Q, d, z))
+    A, B = solution
+    A = ((A * 180) / np.pi)//(360/1600)
+    B = ((B * 180) / np.pi)//(360/1600)
+    C = ((np.arctan(y / x) * 180) / np.pi)//(360/1600)
+    return A, B, C
 
 class DepthCamera:
     def __init__(self):
@@ -120,6 +159,30 @@ def draw_curve(img, points):
 
     detailed_curve_points = [(float(x), float(y)) for x, y in zip(x_new, y_new)]
     return img, detailed_curve_points
+def sent_data(array):
+    prevsteps1,prevsteps2,prevsteps3=0,0,0
+    delay=3500
+    for i in array:
+        step1,step2,step3=ik(i[0],i[1],0)
+        input1=step1-prevsteps1
+        input2=step2-prevsteps2
+        input3=step3-prevsteps3
+        move_motors(input1,input2,input3)
+        time.sleep(delay)
+        delay=1000
+        prevsteps1,prevsteps2,prevsteps3=step1,step2,step3
+def print_data(array):
+    prevsteps1,prevsteps2,prevsteps3=0,0,0
+    delay=3.5
+    for i in array:
+        step1,step2,step3=ik(i[0],i[1],0)
+        input1=step1-prevsteps1
+        input2=step2-prevsteps2
+        input3=step3-prevsteps3
+        print(input1,input2,input3)
+        time.sleep(delay)
+        delay=1
+        prevsteps1,prevsteps2,prevsteps3=step1,step2,step3
 
 dc = DepthCamera()
 cv2.namedWindow("frame")
@@ -146,7 +209,7 @@ while True:
         colour, detailed_curve_points = draw_curve(colour, curve_points)
 
     cv2.imshow("frame", colour)
-    cv2.imshow("depth", depth_colormap)
+    #cv2.imshow("depth", depth_colormap)
     
     key = cv2.waitKey(1)
     if key == 27:  # Exit on pressing 'Esc' key
@@ -156,16 +219,21 @@ dc.release()
 cv2.destroyAllWindows()
 
 # Calculate conversion factors after the corner points are selected
-print(detailed_curve_points)
+#print(detailed_curve_points)
 if len(corner_points) == 4:
     conversion_factors, origin = pixel_to_real_world(corner_points, lengths)
-    print("Conversion Factors:", conversion_factors)
+    #print("Conversion Factors:", conversion_factors)
     print("Origin:", origin)
 
     # Convert detailed curve points to real-world coordinates
     real_world_coordinates = [convert_coordinates_to_real_world(point, origin, conversion_factors) for point in detailed_curve_points]
     
+
     # Print the real-world coordinates
-    print("Real-world Coordinates of Detailed Curve Points:")
-    for coord in real_world_coordinates:
-        print(coord)
+   # print("Real-world Coordinates of Detailed Curve Points:")
+   # for coord in real_world_coordinates:
+       # print(coord)
+    #sent_data(real_world_coordinates) 
+    print_data(real_world_coordinates)
+
+serial_port.close()  # Close the serial port when done
