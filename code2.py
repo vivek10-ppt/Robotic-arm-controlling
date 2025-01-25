@@ -48,6 +48,47 @@ curve_points = []
 corner_points = []
 drawing_curve = False
 
+# Example lengths in millimeters
+lengths = [965, 715,945, 720]
+
+def pixel_to_real_world(corners, lengths):
+    def euclidean_distance(p1, p2):
+        return np.sqrt((p2[0] - p1[0]) ** 2 + (p2[1] - p1[1]) ** 2)
+    
+    # Calculate pixel distances for each side
+    D1_pixels = euclidean_distance(corners[0], corners[1])
+    D2_pixels = euclidean_distance(corners[1], corners[2])
+    D3_pixels = euclidean_distance(corners[2], corners[3])
+    D4_pixels = euclidean_distance(corners[3], corners[0])
+    
+    # Extract actual lengths from the input
+    L1, L2, L3, L4 = lengths
+    
+    # Calculate conversion factors
+    conv_factor1 = L1 / D1_pixels
+    conv_factor2 = L2 / D2_pixels
+    conv_factor3 = L3 / D3_pixels
+    conv_factor4 = L4 / D4_pixels
+    
+    return [conv_factor1, conv_factor2, conv_factor3, conv_factor4], corners[3]  # corners[3] is the bottom-left corner
+
+def convert_coordinates_to_real_world(pixel_point, origin, conversion_factors):
+    x_pixel, y_pixel = pixel_point
+    x0, y0 = origin
+    conv_factor1, conv_factor2, conv_factor3, conv_factor4 = conversion_factors
+    
+    # Calculate the pixel distance from the origin
+    dx_pixel = x_pixel - x0
+    #y_pixel = y_pixel
+    dy_pixel =  y0-y_pixel
+    
+    
+    # Convert pixel distances to real-world distances using the conversion factors
+    x_real = dx_pixel * conv_factor1
+    y_real = dy_pixel * conv_factor4  # y_real uses conv_factor4 for vertical scaling
+    
+    return float(x_real), float(y_real)
+
 def show_distance(event, x, y, flags, param):
     global curve_points, corner_points, drawing_curve
 
@@ -80,7 +121,6 @@ def draw_curve(img, points):
     detailed_curve_points = [(float(x), float(y)) for x, y in zip(x_new, y_new)]
     return img, detailed_curve_points
 
-
 dc = DepthCamera()
 cv2.namedWindow("frame")
 cv2.setMouseCallback("frame", show_distance)
@@ -106,7 +146,7 @@ while True:
         colour, detailed_curve_points = draw_curve(colour, curve_points)
 
     cv2.imshow("frame", colour)
-    #cv2.imshow("depth", depth_colormap)
+    cv2.imshow("depth", depth_colormap)
     
     key = cv2.waitKey(1)
     if key == 27:  # Exit on pressing 'Esc' key
@@ -115,9 +155,17 @@ while True:
 dc.release()
 cv2.destroyAllWindows()
 
-# Print the detailed curve points
-print("Detailed Curve Points:")
-#print(detailed_curve_points)
-points=np.array(detailed_curve_points)
-#print(points)
+# Calculate conversion factors after the corner points are selected
+print(detailed_curve_points)
+if len(corner_points) == 4:
+    conversion_factors, origin = pixel_to_real_world(corner_points, lengths)
+    print("Conversion Factors:", conversion_factors)
+    print("Origin:", origin)
 
+    # Convert detailed curve points to real-world coordinates
+    real_world_coordinates = [convert_coordinates_to_real_world(point, origin, conversion_factors) for point in detailed_curve_points]
+    
+    # Print the real-world coordinates
+    print("Real-world Coordinates of Detailed Curve Points:")
+    for coord in real_world_coordinates:
+        print(coord)
